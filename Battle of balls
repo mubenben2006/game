@@ -1,0 +1,412 @@
+#include<iostream>
+#include<graphics.h>
+#include<cstdlib>
+#include<ctime>
+
+const int SCR_W = 1024;                            //设置屏幕窗口宽度									  
+const int SCR_H = 500;							   //设置屏幕窗口高度									  
+const int MAP_W = SCR_W * 2;                       //设置地图宽度										    
+const int MAP_H = SCR_H * 2;                       //设置地图高度										    
+const int FD_NUM = 200;                            //食物小球的数量									   
+const int AI_NUM = 40;                             //AI小球的数量	
+const double SPF = 1000 / 90;                      //每帧图像绘制所需要的时间（毫秒）
+																										  
+//创建小球结构																						    
+struct Ball																								  
+{																										  
+	double x, y;                                   //圆心坐标											  
+	double r;									   //小球的半径											 
+	bool flag;									   //决定小球是否存活 true-1存活 false-0死亡			  
+	COLORREF color;                                //小球的填充颜色									   
+};																										  
+	
+Ball PL_Ball;                                      //创建玩家小球
+Ball FD_Ball[FD_NUM];                              //创建FD_NUM个食物小球								   										    
+Ball AI_Ball[AI_NUM];                              //创建AI_NUM个AI小球									 
+POINT REF_xy;                                      //创建参考点											 
+																										  
+void MAP_Draw();                                   //地图绘制											  											  
+void FD_Draw();                                    //食物小球绘制										    
+void PL_Draw();                                    //玩家小球绘制										    
+void AI_Draw();									   //AI小球绘制	
+void SCR_Draw();                                   //屏幕绘制	
+void GAME_Draw();                                  //游戏绘制										  
+void FD_Init();                                    //食物小球初始化									   
+void PL_Init();                                    //玩家小球初始化									   
+void AI_Init();                                    //AI小球初始化										 
+void GAME_Init();                                  //游戏初始化											 
+void PL_Control(int step);                         //玩家小球控制										    
+void Camera_Pos();                                 //视角参考坐标										    
+double CC_Distance(Ball b1, Ball b2);              //两个球之间距离									   
+void PL_Eat_FD();                                  //玩家小球吃食物小球	
+void PL_Eat_AI();                                  //玩家小球吃AI小球
+void AI_Eat_FD();                                  //AI小球吃食物小球
+void AI_Eat_AI(Ball* AI_Catch, Ball* AI_Run);      //AI小球吃AI小球
+void FD_Add(int i);                                //补充食物小球	
+void AI_Add(int i);                                //补充AI小球
+void AI_AutoMove();                                //AI小球自动移动									    
+void AI_Catch(Ball* AI_Catch, Ball* AI_Run, int step);    //AI小球追逐
+void GAME_Over();                                  //游戏结束
+
+IMAGE MAP(MAP_W, MAP_H);                           //创建地图
+
+int main()
+{
+
+	initgraph(1024, 500, EX_SHOWCONSOLE);          //绘制屏幕窗口
+	GAME_Init();                                   //游戏初始化
+	while (1)
+	{
+		clock_t Start_Draw_Time = clock();         //记录绘制开始时时钟节拍
+		GAME_Draw();                               //游戏绘制
+		clock_t Frame_Draw_Time = clock() - Start_Draw_Time;       //记录绘制结束时的时钟节拍
+		if (Frame_Draw_Time < SPF)
+		{
+			clock_t DelayTime = SPF - Frame_Draw_Time;
+			Sleep(DelayTime);                      //控制停顿
+		}
+		PL_Control(2);                             //游戏控制                         
+		AI_AutoMove();                             //AI小球自动移动
+		if (!PL_Ball.flag)
+			break;
+	}
+	GAME_Over();
+	std::cin.get();
+	return 0;
+}
+
+//地图绘制
+void MAP_Draw()
+{
+	SetWorkingImage(&MAP);                          //设置地图为当前绘图设备
+	setbkcolor(WHITE);                              //设置当前图片背景色
+	cleardevice();                                  //使用当前设置背景色清空图片
+}
+
+//食物小球绘制
+void FD_Draw()
+{
+	for (int i = 0; i < FD_NUM; i++)
+	{
+		if (FD_Ball[i].flag)
+		{
+			setfillcolor(FD_Ball[i].color);         //设置食物小球填充色，如果不设置就会使用背景色
+			solidcircle(FD_Ball[i].x, FD_Ball[i].y, FD_Ball[i].r);  //绘制实心食物小球
+		}
+	}
+}
+
+//玩家小球绘制
+void PL_Draw()
+{
+	if (PL_Ball.flag)
+	{
+		setfillcolor(PL_Ball.color);                   //设置食物小球填充色，如果不设置就会使用地图背景色
+		solidcircle(PL_Ball.x, PL_Ball.y, PL_Ball.r);  //绘制实心食物小球
+	}
+
+	setbkmode(TRANSPARENT);                                  //设置名称背景模式为透明
+	settextcolor(RED);                                       //设置名称颜色，如果不设置就用背景色
+	settextstyle(17, 0, _T("Consolas"));                     //设置名称大小 样式 “Consolas”                
+	outtextxy(PL_Ball.x - 17, PL_Ball.y - 6, _T("木本苯"));      //设置玩家小球名字
+}
+
+//AI小球绘制
+void AI_Draw()
+{
+	for (int i = 0; i < AI_NUM; i++)
+	{
+		if (AI_Ball[i].flag)
+		{
+			setfillcolor(AI_Ball[i].color);         //设置AI小球填充色，如果不设置就会使用背景色
+			solidcircle(AI_Ball[i].x, AI_Ball[i].y, AI_Ball[i].r);  //绘制实心AI小球
+		}
+	}
+}
+
+//屏幕窗口绘制
+void SCR_Draw()
+{
+	SetWorkingImage();                              //设置屏幕窗口为当前绘图设备
+	Camera_Pos();                                   //获取参考坐标
+	putimage(0, 0, SCR_W, SCR_H, &MAP, REF_xy.x, REF_xy.y);       //加载图片
+}
+
+//游戏绘制
+void GAME_Draw()
+{
+	MAP_Draw();
+	FD_Draw();
+	PL_Draw();
+	AI_Draw();
+	SCR_Draw();
+}
+
+//食物小球初始化
+void FD_Init()
+{
+	for (int i = 0; i < FD_NUM; i++)
+	{
+		FD_Ball[i].x = std::rand() % MAP_W;          //随机设置食物小球圆心x [0,MAP_W]
+		FD_Ball[i].y = std::rand() % MAP_H;          //随机设置食物小球圆心y [0,MAP_H]
+		FD_Ball[i].r = std::rand() % 10 + 1;         //随机设置食物小球半径r [1，10]
+		FD_Ball[i].flag = true;                      //设置食物小球初始状态flag为存活true
+		FD_Ball[i].color = RGB(std::rand() % 256, std::rand() % 256, std::rand() % 256);                     //通过设置三原色随机填充食物小球颜色color 
+	}
+}
+
+//玩家小球初始化
+void PL_Init()
+{
+	PL_Ball.x = std::rand() % MAP_W;          //随机设置玩家小球圆心x [0,MAP_W]
+	PL_Ball.y = std::rand() % MAP_H;          //随机设置玩家小球圆心y [0,MAP_H]
+	PL_Ball.r = 13;                           //设置玩家小球半径r  小于所有食物小球 
+	PL_Ball.flag = true;                      //设置玩家小球初始状态flag为存活true
+	PL_Ball.color = GREEN;                    //设置玩家小球填充颜色color为GREEN
+}
+
+//AI小球初始化
+void AI_Init()
+{
+	for (int i = 0; i < AI_NUM; i++)
+	{
+		AI_Ball[i].x = std::rand() % MAP_W;          //随机设置AI小球圆心x [0,MAP_W]
+		AI_Ball[i].y = std::rand() % MAP_H;          //随机设置AI小球圆心y [0,MAP_H]
+		AI_Ball[i].r = std::rand() % 20 + 10;         //随机设置AI小球半径r [10，29]
+		AI_Ball[i].flag = true;                      //设置AI小球初始状态flag为存活true
+		AI_Ball[i].color = RGB(std::rand() % 256, std::rand() % 256, std::rand() % 256);                     //通过设置三原色随机填充AI小球颜色color 
+	}
+}
+
+//游戏初始化
+void GAME_Init()
+{
+	std::srand(time(NULL));				 //设置随机数种子
+	FD_Init();							 //食物小球初始化
+	PL_Init();							 //玩家小球初始化
+	AI_Init();                           //AI小球初始化
+}
+
+//玩家小球控制
+void PL_Control(int step)
+{
+	//获取异步按键状态(玩家小球上移一步)
+	if (GetAsyncKeyState(VK_UP))
+	{
+		if ((PL_Ball.y - PL_Ball.r) > 0)
+		{
+			PL_Ball.y -= step;
+			PL_Eat_FD();
+			PL_Eat_AI();
+		}
+	}
+	//获取异步按键状态(玩家小球下移一步)
+	if(GetAsyncKeyState(VK_DOWN))
+	{
+		if ((PL_Ball.y + PL_Ball.r) < MAP_H)
+		{
+			PL_Ball.y += step;
+			PL_Eat_FD();
+			PL_Eat_AI();
+		}
+	}
+	//获取异步按键状态(玩家小球左移一步)
+	if(GetAsyncKeyState(VK_LEFT))
+	{
+		if ((PL_Ball.x - PL_Ball.r) > 0)
+		{
+			PL_Ball.x -= step;
+			PL_Eat_FD();
+			PL_Eat_AI();
+		}
+	}
+	//获取异步按键状态(玩家小球右移一步)
+	if(GetAsyncKeyState(VK_RIGHT))
+	{
+		if ((PL_Ball.x +PL_Ball.r) < MAP_W)
+		{
+			PL_Ball.x += step;
+			PL_Eat_FD();
+			PL_Eat_AI();
+		}
+	}
+} 
+
+//获取将视角框定位到以玩家小球为中心的相对坐标
+void Camera_Pos()
+{
+	REF_xy.x = PL_Ball.x - SCR_W / 2;
+	REF_xy.y = PL_Ball.y - SCR_H / 2;
+
+	//防窗口越界
+	if (REF_xy.x < 0) REF_xy.x = 0;
+	if (REF_xy.x > (MAP_W - SCR_W)) REF_xy.x = MAP_W - SCR_W;
+	if (REF_xy.y < 0) REF_xy.y = 0;
+	if (REF_xy.y > (MAP_H - SCR_H)) REF_xy.y = MAP_H - SCR_H;
+
+}
+
+//两个球之间距离
+double CC_Distance(Ball b1, Ball b2)
+{
+	return sqrt((b1.x - b2.x)* (b1.x - b2.x) + (b1.y - b2.y)* (b1.y - b2.y));
+}
+//玩家小球吃食物小球
+void PL_Eat_FD()
+{
+	for (int i = 0; i < FD_NUM; i++)         //遍历所有食物小球，判断是否吃掉
+	{
+		if (CC_Distance(PL_Ball, FD_Ball[i]) <= PL_Ball.r && FD_Ball[i].flag)
+		{
+			FD_Ball[i].flag = false;
+			PL_Ball.r += FD_Ball[i].r / 10;
+		}
+
+		//吃完食物小球后立即补充
+		if (!FD_Ball[i].flag)
+			FD_Add(i);
+	}
+}
+
+//玩家小球吃AI小球
+void PL_Eat_AI()
+{
+	for (int i = 0; i < AI_NUM; i++)         //遍历所有AI小球，判断是否吃掉
+	{
+		if (CC_Distance(PL_Ball, AI_Ball[i]) <= PL_Ball.r && AI_Ball[i].flag)
+		{
+			if (PL_Ball.r>=AI_Ball[i].r)
+			{
+				AI_Ball[i].flag = false;
+				PL_Ball.r += AI_Ball[i].r / 10;
+			}
+			else
+			{
+				PL_Ball.flag = false;
+				break;
+			}
+		}
+
+		//吃完食物小球后立即补充
+		if (!AI_Ball[i].flag)
+			AI_Add(i);
+	}
+}
+
+//AI小球吃食物小球
+void AI_Eat_FD()
+{
+	for (int i = 0; i< AI_NUM; i++)                //遍历所有AI小球
+	{
+		for (int j = 0; j < FD_NUM; j++)         //遍历所有食物小球，判断是否吃掉
+		{
+			if (CC_Distance(AI_Ball[i], FD_Ball[j]) <= AI_Ball[i].r && FD_Ball[j].flag)
+			{
+				FD_Ball[j].flag = false;
+				AI_Ball[i].r += FD_Ball[j].r / 10;
+			}
+
+			//吃完食物小球后立即补充
+			if (!FD_Ball[j].flag)
+				FD_Add(j);
+		}
+	}
+}
+
+//AI小球吃AI小球
+void AI_Eat_AI(Ball* AI_Catch, Ball* AI_Run)
+{
+	if (CC_Distance(*AI_Catch, *AI_Run) <= AI_Catch->r && AI_Run->flag)
+	{
+		AI_Run->flag = false;
+		AI_Catch->r += AI_Run->r / 10;
+	}
+}
+
+//补充食物小球
+void FD_Add(int i)
+{
+		FD_Ball[i].x = std::rand() % MAP_W;          //随机设置食物小球圆心x [0,MAP_W]
+		FD_Ball[i].y = std::rand() % MAP_H;          //随机设置食物小球圆心y [0,MAP_H]
+		FD_Ball[i].r = std::rand() % 10 + 1;         //随机设置食物小球半径r [1，10]
+		FD_Ball[i].flag = true;                      //设置食物小球状态flag为存活true
+		FD_Ball[i].color = RGB(std::rand() % 256, std::rand() % 256, std::rand() % 256);                     //通过设置三原色随机填充食物小球颜色color 
+}
+
+//补充AI小球
+void AI_Add(int i)
+{
+	AI_Ball[i].x = std::rand() % MAP_W;          //随机设置AI小球圆心x [0,MAP_W]
+	AI_Ball[i].y = std::rand() % MAP_H;          //随机设置AI小球圆心y [0,MAP_H]
+	AI_Ball[i].r = std::rand() % 20 + 10;         //随机设置AI小球半径r [10，29]
+	AI_Ball[i].flag = true;                      //设置AI小球初始状态flag为存活true
+	AI_Ball[i].color = RGB(std::rand() % 256, std::rand() % 256, std::rand() % 256);                         //通过设置三原色随机填充AI小球颜色color 
+}
+
+//AI小球自动移动
+void AI_AutoMove()
+{
+	for (int i = 0; i < AI_NUM; i++)
+	{
+		double scale = MAP_W;
+		int index = -1;
+		if (AI_Ball[i].flag)
+		{
+			for (int j = i + 1; j < AI_NUM; j++)
+			{
+				if (AI_Ball[i].r > AI_Ball[j].r && AI_Ball[j].flag)
+				{
+					if (CC_Distance(AI_Ball[i], AI_Ball[j]) < scale)
+					{
+						scale = CC_Distance(AI_Ball[i], AI_Ball[j]);
+						index = j;
+					}
+				}
+			}
+		}
+		if (index != -1)
+		{
+			AI_Catch(&AI_Ball[i],&AI_Ball[index],1);
+		}
+	}
+}
+
+//AI小球追逐
+void AI_Catch(Ball* AI_Catch, Ball* AI_Run, int step)
+{
+	if (AI_Catch->x < AI_Run->x)
+	{
+		AI_Catch->x += step;
+		AI_Eat_FD(); 
+		AI_Eat_AI(AI_Catch, AI_Run);
+	}
+	else
+	{
+		AI_Catch->x -= step;
+		AI_Eat_FD();
+		AI_Eat_AI(AI_Catch, AI_Run);
+	}
+	if (AI_Catch->y < AI_Run->y)
+	{
+		AI_Catch->y += step;
+		AI_Eat_FD();
+		AI_Eat_AI(AI_Catch, AI_Run);
+	}
+	else
+	{
+		AI_Catch->y -= step;
+		AI_Eat_FD();
+		AI_Eat_AI(AI_Catch, AI_Run);
+	}
+}
+
+//游戏结束
+void GAME_Over()
+{
+	setbkcolor(WHITE);
+	cleardevice();
+	setbkmode(TRANSPARENT);                                    //设置"Game Over!"背景模式为透明
+	settextcolor(RED);                                         //设置字体颜色，如果不设置就用背景色
+	settextstyle(80,60, _T("Consolas"));                     //设置字体大小 样式 “Consolas”                
+	outtextxy(200,200, _T("Game Over!"));        //设置"Game Over!"
+}
